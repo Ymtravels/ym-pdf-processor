@@ -907,6 +907,11 @@ function extractPNR(text, airline) {
   return "";
 }
 
+function stripTitles(name) {
+  if (!name) return name;
+  return name.replace(/\b(?:Mr|Mrs|Ms|Miss|Dr)\b/gi, "").replace(/\s+/g, " ").trim();
+}
+
 function extractPassengerName(text, airline) {
   let firstName = "";
   let lastName = "";
@@ -995,7 +1000,7 @@ function extractPassengerName(text, airline) {
     }
     
     if (firstName && lastName) {
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
   }
   
@@ -1027,7 +1032,7 @@ function extractPassengerName(text, airline) {
           firstName = capitalizeWords(firstNameRaw);
           lastName = capitalizeWords(firstMatch[2]);
           Logger.log("AC new format detected: " + firstName + " " + lastName + ", count: " + passengerCount);
-          return { firstName, lastName, passengerCount };
+          return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
         }
       }
     }
@@ -1042,10 +1047,10 @@ function extractPassengerName(text, airline) {
       if (nameParts.length >= 2) {
         lastName = capitalizeWords(nameParts[nameParts.length - 1]);
         firstName = capitalizeWords(nameParts.slice(0, -1).join(" "));
-        return { firstName, lastName, passengerCount };
+        return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
       } else if (nameParts.length === 1) {
         lastName = capitalizeWords(nameParts[0]);
-        return { firstName, lastName, passengerCount };
+        return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
       }
     }
     
@@ -1055,7 +1060,7 @@ function extractPassengerName(text, airline) {
     if (acMatch2 && acMatch2[3].toLowerCase() !== "ticket" && acMatch2[3].toLowerCase() !== "seats") {
       firstName = capitalizeWords(acMatch2[1] + " " + acMatch2[2]);
       lastName = capitalizeWords(acMatch2[3]);
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
     
     // Even simpler fallback: just first and last name
@@ -1064,7 +1069,7 @@ function extractPassengerName(text, airline) {
     if (acMatch3 && acMatch3[2].toLowerCase() !== "ticket" && acMatch3[2].toLowerCase() !== "seats") {
       firstName = capitalizeWords(acMatch3[1]);
       lastName = capitalizeWords(acMatch3[2]);
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
   }
   
@@ -1085,7 +1090,7 @@ function extractPassengerName(text, airline) {
     if (porterMatch1) {
       firstName = capitalizeWords(porterMatch1[1]);
       lastName = capitalizeWords(porterMatch1[2]);
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
     
     const porterPattern2 = /([A-Z]{3,})\s+([A-Z]{3,})\s*(?:SEATS|S\s*E\s*A\s*T|EWR|YTZ|YYZ|LGA|JFK)/i;
@@ -1093,7 +1098,7 @@ function extractPassengerName(text, airline) {
     if (porterMatch2) {
       firstName = capitalizeWords(porterMatch2[1]);
       lastName = capitalizeWords(porterMatch2[2]);
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
     
     const porterPattern3 = /Passengers?\s+([A-Z][A-Z]+)\s+([A-Z][A-Z]+)/i;
@@ -1101,7 +1106,7 @@ function extractPassengerName(text, airline) {
     if (porterMatch3) {
       firstName = capitalizeWords(porterMatch3[1]);
       lastName = capitalizeWords(porterMatch3[2]);
-      return { firstName, lastName, passengerCount };
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
   }
   
@@ -1111,7 +1116,7 @@ function extractPassengerName(text, airline) {
   if (acMatch) {
     firstName = capitalizeWords(acMatch[1]);
     lastName = capitalizeWords(acMatch[2]);
-    return { firstName, lastName, passengerCount };
+    return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
   }
   
   // LASTNAME/FIRSTNAME format
@@ -1120,10 +1125,10 @@ function extractPassengerName(text, airline) {
   if (slashMatch) {
     lastName = capitalizeWords(slashMatch[1]);
     firstName = capitalizeWords(slashMatch[2]);
-    return { firstName, lastName, passengerCount };
+    return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
   }
   
-  return { firstName, lastName, passengerCount };
+  return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
 }
 
 function extractFlightDetails(text, airline) {
