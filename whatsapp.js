@@ -29,12 +29,41 @@ const ALL_CAPS_NAME_RE = /^[A-Z][A-Z\s]+[A-Z]$/;
 const EDITED_TAG_RE = /\s*<This message was edited>\s*$/;
 
 function processWhatsAppChat() {
+  const ui = SpreadsheetApp.getUi();
+
+  const promptResponse = ui.prompt(
+    "Process WhatsApp Chat",
+    "Process messages from date (YYYY-MM-DD) - leave blank for all messages:",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  let cutoffDate = null;
+  if (promptResponse.getSelectedButton() === ui.Button.OK) {
+    const inputText = promptResponse.getResponseText().trim();
+    if (inputText !== "") {
+      cutoffDate = parseISODate_(inputText);
+      if (!cutoffDate) {
+        ui.alert('Invalid date: "' + inputText + '". Use YYYY-MM-DD format.');
+        return;
+      }
+    }
+  }
+  // CANCEL or CLOSE -> cutoffDate stays null -> process all messages.
+
   const file = findWhatsAppFile_();
   if (!file) return;
 
   // Newer WhatsApp exports use U+202F (narrow no-break space) before AM/PM.
   const text = file.getBlob().getDataAsString().replace(/ /g, " ");
-  const messages = splitIntoMessages_(text);
+  let messages = splitIntoMessages_(text);
+
+  if (cutoffDate) {
+    const cutoffMs = cutoffDate.getTime();
+    messages = messages.filter(msg => {
+      const msgDate = whatsAppDateToDate_(msg.date);
+      return msgDate && msgDate.getTime() >= cutoffMs;
+    });
+  }
 
   const bookings = [];
   for (const msg of messages) {
@@ -277,4 +306,26 @@ function showSummaryAlert_(parsed, filled, unmatched) {
     }
   }
   ui.alert("WhatsApp Chat Processed", lines.join("\n"), ui.ButtonSet.OK);
+}
+
+function parseISODate_(str) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return null;
+  const [y, m, d] = str.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  // Catch invalid dates like 2026-02-30, which Date silently rolls forward.
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+    return null;
+  }
+  return dt;
+}
+
+function whatsAppDateToDate_(dateStr) {
+  // M/D/YY format. yy < 80 -> 2000s, else 1900s.
+  const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (!m) return null;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  const yy = Number(m[3]);
+  const year = yy < 80 ? 2000 + yy : 1900 + yy;
+  return new Date(year, month - 1, day);
 }
