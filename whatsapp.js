@@ -73,7 +73,7 @@ function processWhatsAppChat() {
 
   writeCostDataTab_(bookings);
   const result = applyCostFormulas_();
-  showSummaryAlert_(bookings.length, result.filled, result.unmatchedPNRs);
+  showSummaryAlert_(bookings.length, result.filled, result.skippedExisting, result.unmatchedPNRs);
 }
 
 function findWhatsAppFile_() {
@@ -209,7 +209,7 @@ function applyCostFormulas_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { filled: 0, unmatchedPNRs: [] };
+  if (lastRow < 2) return { filled: 0, skippedExisting: 0, unmatchedPNRs: [] };
 
   // exactCostMap keys = the verbatim Column C value ("ABC" or "ABC / DEF").
   // containedInMerged = individual PNRs that appear inside any merged row.
@@ -233,8 +233,11 @@ function applyCostFormulas_() {
   const numRows = lastRow - 1;
   const operators = sheet.getRange(2, MAIN_OPERATOR_COL, numRows, 1).getValues();
   const pnrs = sheet.getRange(2, MAIN_PNR_COL, numRows, 1).getValues();
+  const existingCosts = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getValues();
+  const existingFormulas = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getFormulas();
 
   let filled = 0;
+  let skippedExisting = 0;
   const unmatchedPNRs = [];
 
   for (let i = 0; i < numRows; i++) {
@@ -243,6 +246,14 @@ function applyCostFormulas_() {
 
     const pnrCell = String(pnrs[i][0] || "").trim();
     if (!pnrCell) continue;
+
+    // Safety: never overwrite existing Column G data (value OR formula).
+    // A cell is considered occupied if it holds any value, or any formula —
+    // including a formula that currently evaluates to "" (could be user-authored).
+    if (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "") {
+      skippedExisting++;
+      continue;
+    }
 
     const rowNum = i + 2;
     const targetCell = sheet.getRange(rowNum, MAIN_COST_COL);
@@ -286,14 +297,15 @@ function applyCostFormulas_() {
     }
   }
 
-  return { filled, unmatchedPNRs };
+  return { filled, skippedExisting, unmatchedPNRs };
 }
 
-function showSummaryAlert_(parsed, filled, unmatched) {
+function showSummaryAlert_(parsed, filled, skippedExisting, unmatched) {
   const ui = SpreadsheetApp.getUi();
   const lines = [];
   lines.push("Bookings parsed from WhatsApp: " + parsed);
   lines.push("Cost values filled in main tab: " + filled);
+  lines.push("Rows skipped (already had data): " + skippedExisting);
   lines.push("");
   if (unmatched.length === 0) {
     lines.push("All PNRs matched.");
