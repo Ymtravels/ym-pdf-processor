@@ -13,9 +13,13 @@
 const WHATSAPP_FOLDER_NAME = "YM travel whatsapp costs";
 const COST_DATA_TAB_NAME = "Cost Data";
 const OPERATOR_NAME_FILTER = "Zalman";
+const WHATSAPP_FROM = "Mendy";
+const WHATSAPP_SYSTEM = "Gol AR";
 
 const COST_DATA_HEADERS = ["Date", "Time", "PNR", "Passenger Names", "Cost", "Sender", "Source Message"];
 
+const MAIN_FROM_COL = 4;      // D
+const MAIN_SYSTEM_COL = 5;    // E
 const MAIN_OPERATOR_COL = 6;  // F
 const MAIN_COST_COL = 7;      // G
 const MAIN_PNR_COL = 16;      // P
@@ -73,7 +77,7 @@ function processWhatsAppChat() {
 
   writeCostDataTab_(bookings);
   const result = applyCostFormulas_();
-  showSummaryAlert_(bookings.length, result.filled, result.skippedExisting, result.unmatchedPNRs);
+  showSummaryAlert_(bookings.length, result.filled, result.fromFilled, result.systemFilled, result.skippedExisting, result.unmatchedPNRs);
 }
 
 function findWhatsAppFile_() {
@@ -209,7 +213,7 @@ function applyCostFormulas_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { filled: 0, skippedExisting: 0, unmatchedPNRs: [] };
+  if (lastRow < 2) return { filled: 0, fromFilled: 0, systemFilled: 0, skippedExisting: 0, unmatchedPNRs: [] };
 
   // exactCostMap keys = the verbatim Column C value ("ABC" or "ABC / DEF").
   // containedInMerged = individual PNRs that appear inside any merged row.
@@ -235,8 +239,14 @@ function applyCostFormulas_() {
   const pnrs = sheet.getRange(2, MAIN_PNR_COL, numRows, 1).getValues();
   const existingCosts = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getValues();
   const existingFormulas = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getFormulas();
+  const existingFroms = sheet.getRange(2, MAIN_FROM_COL, numRows, 1).getValues();
+  const existingFromFormulas = sheet.getRange(2, MAIN_FROM_COL, numRows, 1).getFormulas();
+  const existingSystems = sheet.getRange(2, MAIN_SYSTEM_COL, numRows, 1).getValues();
+  const existingSystemFormulas = sheet.getRange(2, MAIN_SYSTEM_COL, numRows, 1).getFormulas();
 
   let filled = 0;
+  let fromFilled = 0;
+  let systemFilled = 0;
   let skippedExisting = 0;
   const unmatchedPNRs = [];
 
@@ -266,20 +276,18 @@ function applyCostFormulas_() {
       if (exactCostMap.has(spacedKey)) {
         targetCell.setFormula(`=IFERROR(VLOOKUP("${spacedKey}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`);
         filled++;
-        continue;
+      } else {
+        const missing = parts.filter(p => !exactCostMap.has(p));
+        if (missing.length > 0) {
+          for (const m of missing) unmatchedPNRs.push(m);
+          continue; // leave Column G untouched, skip D/E too
+        }
+        const formula = parts
+          .map(p => `IFERROR(VLOOKUP("${p}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), 0)`)
+          .join("+");
+        targetCell.setFormula("=" + formula);
+        filled++;
       }
-
-      const missing = parts.filter(p => !exactCostMap.has(p));
-      if (missing.length > 0) {
-        for (const m of missing) unmatchedPNRs.push(m);
-        continue; // leave Column G untouched
-      }
-
-      const formula = parts
-        .map(p => `IFERROR(VLOOKUP("${p}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), 0)`)
-        .join("+");
-      targetCell.setFormula("=" + formula);
-      filled++;
     } else {
       // Single PNR in main tab.
       if (exactCostMap.has(pnrCell)) {
@@ -288,23 +296,37 @@ function applyCostFormulas_() {
       } else if (containedInMerged.has(pnrCell)) {
         // Found only inside a merged Cost Data row — can't split roundtrip cost.
         unmatchedPNRs.push(pnrCell + " (only in merged WhatsApp row)");
-        // Leave Column G untouched.
+        continue; // skip D/E
       } else {
         // Not in Cost Data at all — write a live formula so it picks up if added later.
         targetCell.setFormula(`=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`);
         unmatchedPNRs.push(pnrCell);
+        continue; // unmatched, don't write D/E
       }
+    }
+
+    // Reached here only via a successful-match branch (filled++ above).
+    // Per-column safety: skip D or E independently if either already holds data.
+    if (existingFroms[i][0] === "" && existingFromFormulas[i][0] === "") {
+      sheet.getRange(rowNum, MAIN_FROM_COL).setValue(WHATSAPP_FROM);
+      fromFilled++;
+    }
+    if (existingSystems[i][0] === "" && existingSystemFormulas[i][0] === "") {
+      sheet.getRange(rowNum, MAIN_SYSTEM_COL).setValue(WHATSAPP_SYSTEM);
+      systemFilled++;
     }
   }
 
-  return { filled, skippedExisting, unmatchedPNRs };
+  return { filled, fromFilled, systemFilled, skippedExisting, unmatchedPNRs };
 }
 
-function showSummaryAlert_(parsed, filled, skippedExisting, unmatched) {
+function showSummaryAlert_(parsed, filled, fromFilled, systemFilled, skippedExisting, unmatched) {
   const ui = SpreadsheetApp.getUi();
   const lines = [];
   lines.push("Bookings parsed from WhatsApp: " + parsed);
   lines.push("Cost values filled in main tab: " + filled);
+  lines.push('"From" cells filled in main tab: ' + fromFilled);
+  lines.push('"System" cells filled in main tab: ' + systemFilled);
   lines.push("Rows skipped (already had data): " + skippedExisting);
   lines.push("");
   if (unmatched.length === 0) {
