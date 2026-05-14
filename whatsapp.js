@@ -278,18 +278,15 @@ function applyCostFormulas_(forceRewriteG) {
     const pnrCell = String(pnrs[i][0] || "").trim();
     if (!pnrCell) continue;
 
-    // Safety: never overwrite existing Column G data (value OR formula),
-    // UNLESS the caller passed forceRewriteG = true. D and E always keep
-    // their per-column safety regardless of this flag.
-    if (!forceRewriteG) {
-      if (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "") {
-        skippedExisting++;
-        continue;
-      }
-    }
+    const gAlreadyHasData = !forceRewriteG &&
+      (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "");
 
-    const rowNum = i + 2;
-    const targetCell = sheet.getRange(rowNum, MAIN_COST_COL);
+    // Classify the row: would this PNR match Cost Data, and what would we
+    // write to Column G if it were empty? This runs even when G already has
+    // data, because a successful match still entitles D/E to be filled.
+    let matched = false;
+    let gFormula = null;       // formula we'd write if G is writable
+    const unmatchedToAdd = []; // PNRs we'd push to the unmatched list if G is writable
 
     if (pnrCell.includes("/")) {
       // Merged PNR in main tab.
@@ -297,39 +294,48 @@ function applyCostFormulas_(forceRewriteG) {
       const spacedKey = parts.join(" / ");
 
       if (exactCostMap.has(spacedKey)) {
-        targetCell.setFormula(`=IFERROR(VLOOKUP("${spacedKey}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`);
-        filled++;
+        matched = true;
+        gFormula = `=IFERROR(VLOOKUP("${spacedKey}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
       } else {
         const missing = parts.filter(p => !exactCostMap.has(p));
         if (missing.length > 0) {
-          for (const m of missing) unmatchedPNRs.push(m);
-          continue; // leave Column G untouched, skip D/E too
+          for (const m of missing) unmatchedToAdd.push(m);
+        } else {
+          matched = true;
+          gFormula = "=" + parts
+            .map(p => `IFERROR(VLOOKUP("${p}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), 0)`)
+            .join("+");
         }
-        const formula = parts
-          .map(p => `IFERROR(VLOOKUP("${p}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), 0)`)
-          .join("+");
-        targetCell.setFormula("=" + formula);
-        filled++;
       }
     } else {
       // Single PNR in main tab.
       if (exactCostMap.has(pnrCell)) {
-        targetCell.setFormula(`=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`);
-        filled++;
+        matched = true;
+        gFormula = `=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
       } else if (containedInMerged.has(pnrCell)) {
-        // Found only inside a merged Cost Data row — can't split roundtrip cost.
-        unmatchedPNRs.push(pnrCell + " (only in merged WhatsApp row)");
-        continue; // skip D/E
+        unmatchedToAdd.push(pnrCell + " (only in merged WhatsApp row)");
       } else {
-        // Not in Cost Data at all — write a live formula so it picks up if added later.
-        targetCell.setFormula(`=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`);
-        unmatchedPNRs.push(pnrCell);
-        continue; // unmatched, don't write D/E
+        // Not in Cost Data at all — speculative live formula so it picks up if added later.
+        gFormula = `=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
+        unmatchedToAdd.push(pnrCell);
       }
     }
 
-    // Reached here only via a successful-match branch (filled++ above).
-    // Per-column safety: skip D or E independently if either already holds data.
+    // Apply: respect the G safety, then count and write D/E for matched rows.
+    const rowNum = i + 2;
+    if (gAlreadyHasData) {
+      skippedExisting++;
+      // Don't write G. Don't push to unmatched — the user already has data there.
+    } else {
+      if (gFormula !== null) {
+        sheet.getRange(rowNum, MAIN_COST_COL).setFormula(gFormula);
+      }
+      for (const u of unmatchedToAdd) unmatchedPNRs.push(u);
+      if (matched) filled++;
+    }
+
+    // D/E only when the row actually matched, regardless of G state.
+    if (!matched) continue;
     if (existingFroms[i][0] === "" && existingFromFormulas[i][0] === "") {
       sheet.getRange(rowNum, MAIN_FROM_COL).setValue(WHATSAPP_FROM);
       fromFilled++;
