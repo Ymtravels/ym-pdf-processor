@@ -4,10 +4,11 @@
  * MENU INTEGRATION:
  *   The existing onOpen() in "ym travel sheets.js" creates the YM Travel menu.
  *   Apps Script merges all .gs/.js files into one project, so we cannot define
- *   a second onOpen() here. To expose the new feature, add ONE LINE to the
+ *   a second onOpen() here. To expose the features, add TWO LINES to the
  *   existing onOpen() in "ym travel sheets.js", before `.addToUi()`:
  *
  *       .addItem('Process WhatsApp Chat', 'processWhatsAppChat')
+ *       .addItem('Process WhatsApp Chat (Force Rewrite G)', 'processWhatsAppChatForceRewrite')
  */
 
 const WHATSAPP_FOLDER_NAME = "YM travel whatsapp costs";
@@ -33,6 +34,22 @@ const ALL_CAPS_NAME_RE = /^[A-Z][A-Z\s]+[A-Z]$/;
 const EDITED_TAG_RE = /\s*<This message was edited>\s*$/;
 
 function processWhatsAppChat() {
+  runWhatsAppChat_(false);
+}
+
+function processWhatsAppChatForceRewrite() {
+  const ui = SpreadsheetApp.getUi();
+  const confirm = ui.alert(
+    "Force Rewrite Column G",
+    "This will OVERWRITE existing values in Column G (Cost) for Zalman rows.\n\n" +
+    "Columns D and E will still be protected from overwrite.\n\nContinue?",
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+  runWhatsAppChat_(true);
+}
+
+function runWhatsAppChat_(forceRewriteG) {
   const ui = SpreadsheetApp.getUi();
 
   const promptResponse = ui.prompt(
@@ -76,7 +93,7 @@ function processWhatsAppChat() {
   }
 
   writeCostDataTab_(bookings);
-  const result = applyCostFormulas_();
+  const result = applyCostFormulas_(forceRewriteG);
   showSummaryAlert_(bookings.length, result.filled, result.fromFilled, result.systemFilled, result.skippedExisting, result.unmatchedPNRs);
 }
 
@@ -133,13 +150,17 @@ function parseBookingFromMessage_(msg) {
     const line = rawLine.replace(EDITED_TAG_RE, "").trim();
     if (!line) continue;
 
-    if (COST_RE.test(line)) {
-      costs.push(Number(line.match(COST_RE)[1]));
-      continue;
-    }
     if (REFERENCE_RE.test(line)) {
       refs.push(line);
       continue;
+    }
+    if (COST_RE.test(line)) {
+      const num = Number(line.match(COST_RE)[1]);
+      if (num <= 99999) {
+        costs.push(num);
+        continue;
+      }
+      // Number too large to be a real travel cost — fall through to next classifier.
     }
     if (AGENT_RE.test(line)) {
       agents.push(line);
@@ -209,7 +230,7 @@ function writeCostDataTab_(bookings) {
   sheet.getRange(1, 1, rows.length, COST_DATA_HEADERS.length).setValues(rows);
 }
 
-function applyCostFormulas_() {
+function applyCostFormulas_(forceRewriteG) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const lastRow = sheet.getLastRow();
@@ -257,12 +278,14 @@ function applyCostFormulas_() {
     const pnrCell = String(pnrs[i][0] || "").trim();
     if (!pnrCell) continue;
 
-    // Safety: never overwrite existing Column G data (value OR formula).
-    // A cell is considered occupied if it holds any value, or any formula —
-    // including a formula that currently evaluates to "" (could be user-authored).
-    if (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "") {
-      skippedExisting++;
-      continue;
+    // Safety: never overwrite existing Column G data (value OR formula),
+    // UNLESS the caller passed forceRewriteG = true. D and E always keep
+    // their per-column safety regardless of this flag.
+    if (!forceRewriteG) {
+      if (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "") {
+        skippedExisting++;
+        continue;
+      }
     }
 
     const rowNum = i + 2;
