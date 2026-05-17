@@ -820,7 +820,17 @@ function extractTicketingDate(text, airline) {
       return normalizeDate(aaMatch[1]);
     }
   }
-  
+
+  // United Airlines (Format B): "Date of purchase: Thu, May 07, 2026"
+  // Format A has no explicit ticketing date — falls through to return "".
+  if (airline === "UA") {
+    const uaPattern = /Date of purchase:\s*(?:[A-Za-z]{3},\s*)?([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i;
+    const uaMatch = text.match(uaPattern);
+    if (uaMatch) {
+      return normalizeDate(uaMatch[1]);
+    }
+  }
+
   return "";
 }
 
@@ -884,6 +894,8 @@ function extractPNR(text, airline) {
   
   const patterns = [
     /AA Record Locator[:\s]*([A-Z0-9]{5,6})/i,
+    /Confirmation number:\s*([A-Z0-9]{6})/i,                  // United Format A (lowercase "number")
+    /Confirmation Number:\s*\n?\s*([A-Z0-9]{6})/i,            // United Format B (code may wrap to next line)
     /Record Locator[:\s]*([A-Z0-9]{5,6})/i,
     /Booking [Rr]eference[:\s]*([A-Z0-9]{5,6})/i,
     /Booking confirmation\s*([A-Z0-9]{5,6})/i,  // New AC format
@@ -1003,7 +1015,46 @@ function extractPassengerName(text, airline) {
       return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
     }
   }
-  
+
+  // For United Airlines - handle both formats
+  if (airline === "UA") {
+    // FORMAT A: "Traveler 1 FIRST LAST" (ALL-CAPS name follows the "Traveler 1" label)
+    const uaFormatAPattern = /Traveler\s+1\s+([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+)*)/;
+    const uaFormatAMatch = text.match(uaFormatAPattern);
+    if (uaFormatAMatch) {
+      const nameParts = uaFormatAMatch[1].split(/\s+/);
+      if (nameParts.length >= 2) {
+        lastName = capitalizeWords(nameParts[nameParts.length - 1]);
+        firstName = capitalizeWords(nameParts.slice(0, -1).join(" "));
+      }
+      const travelerMatches = text.match(/\bTraveler\s+\d+\b/g);
+      if (travelerMatches) {
+        passengerCount = travelerMatches.length;
+      }
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
+    }
+
+    // FORMAT B: "Traveler Details" header, then LASTNAME/FIRSTNAME on a following line
+    const uaFormatBPattern = /Traveler Details\s*\n+([A-Z]+)\/([A-Z]+)/;
+    const uaFormatBMatch = text.match(uaFormatBPattern);
+    if (uaFormatBMatch) {
+      lastName = capitalizeWords(uaFormatBMatch[1]);
+      firstName = capitalizeWords(uaFormatBMatch[2]);
+      const detailsIdx = text.indexOf("Traveler Details");
+      if (detailsIdx > -1) {
+        const detailsSection = text.substring(detailsIdx);
+        const slashLines = detailsSection.match(/^[A-Z]+\/[A-Z]+$/gm);
+        if (slashLines) {
+          passengerCount = slashLines.length;
+        }
+      }
+      return { firstName: stripTitles(firstName), lastName: stripTitles(lastName), passengerCount };
+    }
+
+    // Neither format matched — return empty rather than falling through to AC/Porter logic.
+    return { firstName: "", lastName: "", passengerCount: 1 };
+  }
+
   // For Air Canada - handle multiple formats
   if (airline === "AC") {
     // Count passengers by counting title occurrences in Passengers section
@@ -1236,7 +1287,15 @@ function extractFlightDetails(text, airline) {
 
 function extractFlightLegs(text, airline) {
   const legs = [];
-  
+
+  // For UA, use dedicated extractor that handles both UA formats
+  if (airline === "UA") {
+    const uaLegs = extractUAItinerary(text);
+    if (uaLegs.length > 0) {
+      return uaLegs;
+    }
+  }
+
   // For AA, extract the full itinerary to find true origin and final destination
   if (airline === "AA") {
     const aaLegs = extractAAItinerary(text);
@@ -1535,7 +1594,51 @@ function extractAAItinerary(text) {
     cabinConfident: confident,
     date: flightDate
   });
-  
+
+  return legs;
+}
+
+function extractUAItinerary(text) {
+  const legs = [];
+
+  // FORMAT A: "MSP 2H, 40M EWR" — origin + duration + destination on one line
+  const formatAPattern = /\b([A-Z]{3})\s+\d+H[^A-Z]*\d*M?\s+([A-Z]{3})\b/;
+  const formatAMatch = text.match(formatAPattern);
+
+  let origin = "";
+  let destination = "";
+
+  if (formatAMatch) {
+    origin = formatAMatch[1];
+    destination = formatAMatch[2];
+  } else {
+    // FORMAT B: airport codes in parentheses like "Newark (EWR)" — take first two
+    const formatBMatches = [];
+    const formatBPattern = /\(([A-Z]{3})\)/g;
+    let m;
+    while ((m = formatBPattern.exec(text)) !== null) {
+      formatBMatches.push(m[1]);
+    }
+    if (formatBMatches.length >= 2) {
+      origin = formatBMatches[0];
+      destination = formatBMatches[1];
+    }
+  }
+
+  if (!origin || !destination) return legs;
+
+  const cabinInfo = detectCabinClass(text, "UA");
+  const dates = extractDates(text);
+  const flightDate = dates.length > 0 ? dates[0] : "";
+
+  legs.push({
+    from: origin,
+    to: destination,
+    cabin: cabinInfo.cabin,
+    cabinConfident: cabinInfo.confident,
+    date: flightDate
+  });
+
   return legs;
 }
 
@@ -1621,7 +1724,23 @@ function detectCabinClass(text, airline) {
       return { cabin: "business", confident: true };
     }
   }
-  
+
+  // United Airlines
+  if (airline === "UA") {
+    if (/United\s+Polaris/i.test(text) || /United\s+Business/i.test(text)) {
+      return { cabin: "business", confident: true };
+    }
+    if (/United\s+First/i.test(text)) {
+      return { cabin: "business", confident: true };  // Treat First as Business for pricing
+    }
+    if (/United\s+Premium/i.test(text)) {
+      return { cabin: "economy", confident: true };  // Premium Economy → economy for pricing
+    }
+    if (/United\s+Economy/i.test(text)) {
+      return { cabin: "economy", confident: true };
+    }
+  }
+
   // Generic patterns (lower confidence)
   if (textLower.includes("business class")) {
     return { cabin: "business", confident: true };
@@ -1719,6 +1838,11 @@ function isSameArea(airport1, airport2) {
 }
 
 function calculateLegPrice(airline, from, to, cabin) {
+  // United — no pricing rules; manual fill (matches historical AA behavior)
+  if (airline === "UA") {
+    return "";
+  }
+
   for (const rule of PRICING_RULES) {
     if (rule.airline === airline && 
         rule.from.includes(from) && 
