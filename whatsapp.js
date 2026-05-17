@@ -1,14 +1,8 @@
 /**
  * WhatsApp chat parsing for YM Travel cost tracking.
  *
- * MENU INTEGRATION:
- *   The existing onOpen() in "ym travel sheets.js" creates the YM Travel menu.
- *   Apps Script merges all .gs/.js files into one project, so we cannot define
- *   a second onOpen() here. To expose the features, add TWO LINES to the
- *   existing onOpen() in "ym travel sheets.js", before `.addToUi()`:
- *
- *       .addItem('Process WhatsApp Chat', 'processWhatsAppChat')
- *       .addItem('Process WhatsApp Chat (Force Rewrite G)', 'processWhatsAppChatForceRewrite')
+ * Menu items for processWhatsAppChat and processWhatsAppChatForceRewrite
+ * are wired into the YM Travel menu by the onOpen() in "ym travel sheets.js".
  */
 
 const WHATSAPP_FOLDER_NAME = "YM travel whatsapp costs";
