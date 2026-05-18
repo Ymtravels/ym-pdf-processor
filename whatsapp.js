@@ -1,8 +1,9 @@
 /**
  * WhatsApp chat parsing for YM Travel cost tracking.
  *
- * Menu items for processWhatsAppChat and processWhatsAppChatForceRewrite
- * are wired into the YM Travel menu by the onOpen() in "ym travel sheets.js".
+ * processWhatsAppChat is wired into the YM Travel menu by the onOpen() in
+ * "ym travel sheets.js". processWhatsAppChatForceRewrite is intentionally
+ * NOT in the menu; run it from the Apps Script editor when needed.
  */
 
 const WHATSAPP_FOLDER_NAME = "YM travel whatsapp costs";
@@ -275,11 +276,11 @@ function applyCostFormulas_(forceRewriteG) {
     const gAlreadyHasData = !forceRewriteG &&
       (existingCosts[i][0] !== "" || existingFormulas[i][0] !== "");
 
-    // Classify the row: would this PNR match Cost Data, and what would we
-    // write to Column G if it were empty? This runs even when G already has
-    // data, because a successful match still entitles D/E to be filled.
+    // Classify the row: would this PNR match Cost Data, and what cost value
+    // would we write to Column G if it were empty? This runs even when G
+    // already has data, because a successful match still entitles D/E to be filled.
     let matched = false;
-    let gFormula = null;       // formula we'd write if G is writable
+    let costValue = null;      // numeric cost we'd write if G is writable
     const unmatchedToAdd = []; // PNRs we'd push to the unmatched list if G is writable
 
     if (pnrCell.includes("/")) {
@@ -289,28 +290,25 @@ function applyCostFormulas_(forceRewriteG) {
 
       if (exactCostMap.has(spacedKey)) {
         matched = true;
-        gFormula = `=IFERROR(VLOOKUP("${spacedKey}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
+        costValue = exactCostMap.get(spacedKey);
       } else {
         const missing = parts.filter(p => !exactCostMap.has(p));
         if (missing.length > 0) {
           for (const m of missing) unmatchedToAdd.push(m);
         } else {
           matched = true;
-          gFormula = "=" + parts
-            .map(p => `IFERROR(VLOOKUP("${p}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), 0)`)
-            .join("+");
+          costValue = parts.reduce((sum, p) => sum + Number(exactCostMap.get(p)), 0);
         }
       }
     } else {
       // Single PNR in main tab.
       if (exactCostMap.has(pnrCell)) {
         matched = true;
-        gFormula = `=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
+        costValue = exactCostMap.get(pnrCell);
       } else if (containedInMerged.has(pnrCell)) {
         unmatchedToAdd.push(pnrCell + " (only in merged WhatsApp row)");
       } else {
-        // Not in Cost Data at all — speculative live formula so it picks up if added later.
-        gFormula = `=IFERROR(VLOOKUP("${pnrCell}", '${COST_DATA_TAB_NAME}'!C:E, 3, FALSE), "")`;
+        // Not in Cost Data at all — leave G blank, just report as unmatched.
         unmatchedToAdd.push(pnrCell);
       }
     }
@@ -321,8 +319,8 @@ function applyCostFormulas_(forceRewriteG) {
       skippedExisting++;
       // Don't write G. Don't push to unmatched — the user already has data there.
     } else {
-      if (gFormula !== null) {
-        sheet.getRange(rowNum, MAIN_COST_COL).setFormula(gFormula);
+      if (costValue !== null) {
+        sheet.getRange(rowNum, MAIN_COST_COL).setValue(costValue);
       }
       for (const u of unmatchedToAdd) unmatchedPNRs.push(u);
       if (matched) filled++;
@@ -439,4 +437,53 @@ function diagnoseColumnG() {
   Logger.log("=== Summary ===");
   Logger.log("Zalman rows protected (G has value or formula): " + protectedCount);
   Logger.log("Zalman rows that would be overwritten (G empty): " + wouldOverwriteCount);
+}
+
+// One-time cleanup helper. Walks every Zalman row; for each Column G cell that
+// holds a VLOOKUP formula, replaces the formula with the cell's currently
+// displayed value. Formula cells that currently evaluate to "" are cleared
+// (truly empty). Non-VLOOKUP formulas and already-static values are untouched.
+// Safe to re-run; idempotent after one full pass.
+function convertFormulasToValuesInG() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log("No data rows on active sheet.");
+    return;
+  }
+
+  const numRows = lastRow - 1;
+  const operators = sheet.getRange(2, MAIN_OPERATOR_COL, numRows, 1).getValues();
+  const gValues = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getValues();
+  const gFormulas = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getFormulas();
+
+  let converted = 0;
+  let blanked = 0;
+
+  Logger.log("=== convertFormulasToValuesInG ===");
+  Logger.log("Sheet: " + sheet.getName() + ", scanning rows 2.." + lastRow);
+
+  for (let i = 0; i < numRows; i++) {
+    const operator = String(operators[i][0] || "").trim();
+    if (operator !== OPERATOR_NAME_FILTER) continue;
+
+    const formula = gFormulas[i][0];
+    if (formula === "" || !/VLOOKUP/i.test(formula)) continue;
+
+    const rowNum = i + 2;
+    const currentValue = gValues[i][0];
+    const cell = sheet.getRange(rowNum, MAIN_COST_COL);
+
+    if (currentValue === "" || currentValue === null) {
+      cell.clearContent();
+      blanked++;
+    } else {
+      cell.setValue(currentValue);
+    }
+    converted++;
+  }
+
+  Logger.log("Converted: " + converted + " VLOOKUP cell(s) in Column G");
+  Logger.log("Of those, blanked (formula evaluated to \"\"): " + blanked);
 }

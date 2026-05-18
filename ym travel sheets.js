@@ -1917,6 +1917,5 @@ function onOpen() {
   ui.createMenu('YM Travel')
     .addItem('Process PDFs', 'processTravelPDFs')
     .addItem('Process WhatsApp Chat', 'processWhatsAppChat')
-    .addItem('Process WhatsApp Chat (Force Rewrite G)', 'processWhatsAppChatForceRewrite')
     .addToUi();
 }
