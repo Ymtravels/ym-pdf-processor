@@ -390,7 +390,7 @@ function whatsAppDateToDate_(dateStr) {
 // Diagnostic only — DOES NOT modify the sheet. Mirrors the safety check used by
 // applyCostFormulas_ in non-force mode so you can see, per row, whether Column G
 // would be protected or would get overwritten on the next processWhatsAppChat run.
-function diagnoseColumnG_() {
+function diagnoseColumnG() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const lastRow = sheet.getLastRow();
