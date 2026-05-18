@@ -386,3 +386,57 @@ function whatsAppDateToDate_(dateStr) {
   const year = yy < 80 ? 2000 + yy : 1900 + yy;
   return new Date(year, month - 1, day);
 }
+
+// Diagnostic only — DOES NOT modify the sheet. Mirrors the safety check used by
+// applyCostFormulas_ in non-force mode so you can see, per row, whether Column G
+// would be protected or would get overwritten on the next processWhatsAppChat run.
+function diagnoseColumnG_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log("No data rows on active sheet.");
+    return;
+  }
+
+  const numRows = lastRow - 1;
+  const operators = sheet.getRange(2, MAIN_OPERATOR_COL, numRows, 1).getValues();
+  const pnrs = sheet.getRange(2, MAIN_PNR_COL, numRows, 1).getValues();
+  const existingCosts = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getValues();
+  const existingFormulas = sheet.getRange(2, MAIN_COST_COL, numRows, 1).getFormulas();
+
+  let protectedCount = 0;
+  let wouldOverwriteCount = 0;
+
+  Logger.log("=== diagnoseColumnG_ ===");
+  Logger.log("Sheet: " + sheet.getName() + ", scanning rows 2.." + lastRow);
+  Logger.log("Filter: Column F = \"" + OPERATOR_NAME_FILTER + "\"");
+
+  for (let i = 0; i < numRows; i++) {
+    const operator = String(operators[i][0] || "").trim();
+    if (operator !== OPERATOR_NAME_FILTER) continue;
+
+    const rowNum = i + 2;
+    const pnr = String(pnrs[i][0] || "").trim();
+    const gValue = existingCosts[i][0];
+    const gFormula = existingFormulas[i][0];
+
+    // Same expression applyCostFormulas_ uses when forceRewriteG = false.
+    const wouldBeProtected = (gValue !== "" || gFormula !== "");
+
+    if (wouldBeProtected) protectedCount++;
+    else wouldOverwriteCount++;
+
+    Logger.log(
+      "Row " + rowNum +
+      " | PNR: " + (pnr || "(empty)") +
+      " | G value: " + JSON.stringify(gValue) +
+      " | G formula: " + (gFormula === "" ? "(empty)" : gFormula) +
+      " | " + (wouldBeProtected ? "PROTECTED" : "WOULD OVERWRITE")
+    );
+  }
+
+  Logger.log("=== Summary ===");
+  Logger.log("Zalman rows protected (G has value or formula): " + protectedCount);
+  Logger.log("Zalman rows that would be overwritten (G empty): " + wouldOverwriteCount);
+}
