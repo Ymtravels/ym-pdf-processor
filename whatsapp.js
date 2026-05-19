@@ -390,7 +390,11 @@ function whatsAppDateToDate_(dateStr) {
 // would be protected or would get overwritten on the next processWhatsAppChat run.
 function diagnoseColumnG() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getActiveSheet();
+  const sheet = ss.getSheetByName("Main");
+  if (!sheet) {
+    Logger.log('ERROR: sheet "Main" not found.');
+    return;
+  }
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
     Logger.log("No data rows on active sheet.");
@@ -446,7 +450,11 @@ function diagnoseColumnG() {
 // Safe to re-run; idempotent after one full pass.
 function convertFormulasToValuesInG() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getActiveSheet();
+  const sheet = ss.getSheetByName("Main");
+  if (!sheet) {
+    Logger.log('ERROR: sheet "Main" not found.');
+    return;
+  }
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
     Logger.log("No data rows on active sheet.");
